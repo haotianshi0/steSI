@@ -100,9 +100,7 @@ python visualization\method_comparison_high_signal_block.py `
 
 `method_comparison_high_signal_block.py` produces a single 3x3 PNG with `GT`, `Masked Train`, and the seven core methods' predictions on a shared high-signal observed-only sub-matrix  (defaults: `--high_signal_threshold 0.05`, 32-64 spots, 50 sites). It reads `model_registry.csv` and the `gt_ratio.npy` / `train_ratio.npy` / `val_mask.npy` written under `--baselines_subdir` (default: `baselines`).
 
-`visualization/plot_mask_ratio_metrics.py` is an optional helper that plots
-per-method metric curves across holdout ratios from existing
-`layered_metrics.csv` files.
+`visualization/plot_mask_ratio_metrics.py` is an optional helper that plots per-method metric curves across holdout ratios from existing `layered_metrics.csv` files.
 
 Figure outputs are written under:
 
