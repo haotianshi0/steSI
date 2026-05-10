@@ -1,0 +1,23 @@
+{
+  "project": "Spatial transcriptome and epitranscriptome: spatial imputation",
+  "model_count": 7,
+  "mask_semantics": {
+    "gt_ratio": "finite on observed_mask, NaN outside observed_mask",
+    "train_ratio": "finite on train_mask, NaN outside train_mask",
+    "pred_ratio": "finite on train_mask and val_mask; train_mask is overwritten with GT; unobserved entries may be finite predictions or NaN"
+  },
+  "seed_semantics": {
+    "mask_seed": "controls train/val mask generation",
+    "model_seed": "controls model initialization, training randomness, inner masking, and diffusion sampling",
+    "prediction_level_ensemble": "requires one fixed mask_seed and multiple model_seeds"
+  },
+  "models": [
+    "Mean Baseline",
+    "SoftImpute",
+    "Multiple Imputation",
+    "Spatial KNN",
+    "Spatial IDW",
+    "AIRGate-ST",
+    "AIRDiff-ST"
+  ]
+}

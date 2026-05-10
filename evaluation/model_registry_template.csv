@@ -1,0 +1,8 @@
+method,pred_path
+Mean Baseline,results/<run_name>/baselines/mean_baseline_ratio.npy
+SoftImpute,results/<run_name>/baselines/softimpute_ratio.npy
+Multiple Imputation,results/<run_name>/baselines/mi_ratio.npy
+Spatial KNN,results/<run_name>/baselines/spatial_knn_ratio.npy
+Spatial IDW,results/<run_name>/baselines/spatial_idw_ratio.npy
+AIRGate-ST,results/<run_name>/AIRGate-ST/seed<seed>/pred_ratio.npy
+AIRDiff-ST,results/<run_name>/AIRDiff-ST/seed<seed>/pred_ratio.npy
