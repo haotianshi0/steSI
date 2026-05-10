@@ -1,6 +1,6 @@
 # Reproducibility Protocol
 
-This document gives the exact sequence needed to reproduce the core benchmark outputs for `Spatial transcriptome and epitranscriptome: spatial imputation` from a clean copy of the `Spatial Imputation` artifact folder.
+This document gives the exact sequence needed to reproduce the core benchmark outputs for `Spatial transcriptome and epitranscriptome: spatial imputation` from a clean copy of the `steSI` artifact folder.
 
 The workflow follows a typical spatial transcriptomics model-artifact structure: environment setup, data placement, smoke test, benchmark execution, metric collection, and figure generation.
 

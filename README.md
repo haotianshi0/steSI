@@ -2,6 +2,8 @@
 
 Computational artifact for spatial imputation in spatial transcriptome and epitranscriptome data.
 
+steSI stands for "Spatial Transcriptome and Epitranscriptome: Spatial Imputation".
+
 Artifact type: computational model and computational analysis.
 
 ## Overview
@@ -99,7 +101,7 @@ The final reporting workflow uses 20%, 40%, and 60% holdout ratios.
 ## Repository Layout
 
 ```text
-Spatial Imputation/
+steSI/
 +-- configs/          # example benchmark configuration
 +-- data/             # bundled h5ad datasets
 +-- evaluation/       # layered metrics and paired significance tests
@@ -134,7 +136,7 @@ Open a terminal and move into the project root before running any command. The p
 Example:
 
 ```powershell
-cd "C:\path\to\Spatial Imputation"
+cd "C:\path\to\steSI"
 ```
 
 Create the Conda environment:
