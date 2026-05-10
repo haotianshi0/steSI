@@ -1,3 +1,13 @@
+"""Render observed-only block heatmaps for every method in a run's registry.
+
+Driver for ``dual_block_observed_heatmap.py``: reads a run-specific
+``model_registry.csv``, selects three sub-blocks (dense, rare-peak,
+high-signal) once from the shared ground-truth, and renders the per-model
+1x3 + 1x2 figures inside per-method subdirectories. Writes a single
+``all_models_dual_block_summary.json`` listing every figure that was
+produced.
+"""
+
 import argparse
 import csv
 import json
@@ -15,12 +25,14 @@ from dual_block_observed_heatmap import render_block, select_block  # noqa: E402
 
 
 def _resolve_path(path: str) -> str:
+    """Return ``path`` unchanged if absolute, else resolve relative to the project root."""
     if os.path.isabs(path):
         return path
     return os.path.abspath(os.path.join(PROJECT_ROOT, path))
 
 
 def _safe_key(name: str) -> str:
+    """Sanitise a method label into a filesystem-safe lowercase identifier."""
     key = name.lower()
     key = key.replace("baseline", "")
     key = re.sub(r"\(.*?\)", "", key)
@@ -29,6 +41,7 @@ def _safe_key(name: str) -> str:
 
 
 def read_registry(path: str) -> List[Dict[str, str]]:
+    """Load a ``method,pred_path`` registry CSV; relative paths are resolved against the project root."""
     rows = []
     with open(path, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -38,6 +51,7 @@ def read_registry(path: str) -> List[Dict[str, str]]:
 
 
 def _load_if_shape(path: str, shape) -> np.ndarray | None:
+    """Load ``path`` only if it exists and matches the requested shape; else return ``None``."""
     if not os.path.exists(path):
         return None
     arr = np.load(path)
@@ -47,6 +61,13 @@ def _load_if_shape(path: str, shape) -> np.ndarray | None:
 
 
 def load_context(pred_path: str, mask_dir: str | None) -> Dict[str, np.ndarray]:
+    """Load the prediction plus the matching gt/train/val arrays needed for rendering.
+
+    Prefers ``mask_dir`` when supplied (so all methods render against the same
+    shared reference) and otherwise falls back to the prediction's own
+    directory. Raises ``FileNotFoundError`` if any of the four context arrays
+    is missing or shape-incompatible.
+    """
     pred = np.load(pred_path).astype(np.float32)
     model_dir = os.path.dirname(pred_path)
 
@@ -94,6 +115,7 @@ def render_model(method: str,
                  high_signal_min_spots: int,
                  high_signal_max_spots: int,
                  high_signal_threshold: float) -> Dict[str, object]:
+    """Render the dense, rare-peak, and high-signal block triplets for one method."""
     ctx = load_context(pred_path, mask_dir)
 
     dense = select_block(
@@ -179,6 +201,7 @@ def render_model(method: str,
 
 
 def main() -> None:
+    """CLI entry point: render observed-only block heatmaps for every method in a registry."""
     ap = argparse.ArgumentParser(description="Generate dual-block observed-only heatmaps for all registry models.")
     ap.add_argument("--model_registry", required=True, help="Run-specific CSV with columns method,pred_path.")
     ap.add_argument("--mask_dir", default=None, help="Optional shared context directory with gt_ratio.npy, train_ratio.npy, val_mask.npy.")

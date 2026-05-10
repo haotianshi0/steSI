@@ -1,3 +1,18 @@
+"""Build prediction-level ensembles by averaging across model seeds.
+
+Companion to ``run_seed_ensemble.py``: given the same fixed mask seed and
+several model seeds, this script loads each method's per-seed
+``pred_ratio.npy`` files, averages the finite predictions per cell,
+preserves training-visible ground-truth values, and writes one ensemble
+prediction file per method into ``--out_dir/predictions/``. A new
+``model_registry.csv`` is emitted so the ensemble predictions can be
+scored by ``evaluation/collect_layered_metrics.py`` exactly like a
+single-seed run.
+
+Invoked automatically by ``run_seed_ensemble.py``; can also be run
+standalone if the per-seed run directories already exist.
+"""
+
 import argparse
 import csv
 import json
@@ -14,6 +29,7 @@ PYTHON = sys.executable
 
 
 def parse_seeds(value: str) -> List[int]:
+    """Parse a comma-separated seed list into a list of ints (rejects empty)."""
     seeds = [int(x.strip()) for x in value.split(",") if x.strip()]
     if not seeds:
         raise ValueError("--model_seeds must contain at least one integer")
@@ -21,21 +37,25 @@ def parse_seeds(value: str) -> List[int]:
 
 
 def format_mask_name(mask_name: str, mask_seed: int, model_seed: int) -> str:
+    """Substitute seed placeholders in a mask-name template."""
     return mask_name.format(seed=mask_seed, mask_seed=mask_seed, model_seed=model_seed)
 
 
 def run_name_for(sample_id: str, mask_seed: int, model_seed: int, epochs: int, mask_name: str) -> str:
+    """Compose the per-(mask_seed, model_seed) run directory name."""
     resolved_mask = format_mask_name(mask_name, mask_seed, model_seed)
     sample_prefix = "" if sample_id == "151673" else f"{sample_id}_"
     return f"{sample_prefix}mask{mask_seed}_model{model_seed}_e{epochs}_{resolved_mask}"
 
 
 def read_registry(path: str) -> List[Dict[str, str]]:
+    """Load a ``method,pred_path`` registry CSV into a list of row dicts."""
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
 def write_registry(path: str, rows: List[tuple[str, str]]) -> None:
+    """Write a ``method,pred_path`` CSV listing the ensembled predictions."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -45,6 +65,7 @@ def write_registry(path: str, rows: List[tuple[str, str]]) -> None:
 
 
 def safe_name(name: str) -> str:
+    """Sanitise a method label into a filesystem-safe lowercase identifier."""
     out = []
     for ch in name.lower():
         if ch.isalnum():
@@ -58,6 +79,12 @@ def safe_name(name: str) -> str:
 
 
 def same_mask_or_raise(reference_dir: str, candidate_dir: str) -> None:
+    """Confirm two mask directories agree on train/val/observed/gt arrays.
+
+    Used to guarantee that all per-seed runs can be safely averaged: if the
+    masks differ at all, ensembling would mix predictions over different
+    holdout cells and silently bias the metrics.
+    """
     for filename in ["train_mask.npy", "val_mask.npy", "observed_mask.npy", "gt_ratio.npy"]:
         a = np.load(os.path.join(reference_dir, filename))
         b = np.load(os.path.join(candidate_dir, filename))
@@ -66,6 +93,11 @@ def same_mask_or_raise(reference_dir: str, candidate_dir: str) -> None:
 
 
 def finite_mean_stack(arrays: List[np.ndarray]) -> np.ndarray:
+    """Per-cell average over an iterable of arrays, ignoring NaNs.
+
+    Cells where every input is NaN remain NaN in the output. Used to combine
+    per-seed predictions into a single ensemble matrix.
+    """
     stack = np.stack(arrays, axis=0).astype(np.float32)
     finite = np.isfinite(stack)
     count = finite.sum(axis=0)
@@ -76,12 +108,22 @@ def finite_mean_stack(arrays: List[np.ndarray]) -> np.ndarray:
 
 
 def run_cmd(cmd: List[str], cwd: str, label: str) -> None:
+    """Echo and run a subprocess command; abort on non-zero exit."""
     print(f"[Run] {label}: " + " ".join(f'"{x}"' if " " in x else x for x in cmd), flush=True)
     subprocess.run(cmd, cwd=cwd, check=True)
     print(f"[Done] {label}", flush=True)
 
 
 def main() -> None:
+    """CLI entry point: ensemble per-seed predictions and (optionally) score them.
+
+    Locates the per-(mask_seed, model_seed) run directories, validates that
+    every seed used the same mask, averages each method's prediction across
+    seeds, writes the ensembled ``pred_ratio.npy`` files plus a new
+    ``model_registry.csv``, and finally invokes
+    ``evaluation/collect_layered_metrics.py`` on the ensemble registry
+    unless ``--skip_metrics`` is set.
+    """
     parser = argparse.ArgumentParser(description="Build prediction-level ensembles across model seeds for a fixed mask seed.")
     parser.add_argument("--mask_seed", type=int, required=True)
     parser.add_argument("--model_seeds", required=True)

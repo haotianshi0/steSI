@@ -20,11 +20,18 @@ DEFAULT_SOURCE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".
 
 
 def add_source_paths(source_root: str) -> None:
+    """Add the project's helper directories to ``sys.path`` for deferred imports."""
     sys.path.insert(0, os.path.join(source_root, "src", "models", "AIRGate-ST"))
     sys.path.insert(0, os.path.join(source_root, "src", "shared"))
 
 
 def load_filtered_data(source_root: str, h5ad: str, threshold: int, min_depth: int):
+    """Load the h5ad and apply the project's site-frequency and min-depth filters.
+
+    Returns a dict with the filtered count matrices, ``observed_mask``,
+    ground-truth ratio, spatial coordinates (or ``None``), and bookkeeping
+    fields used by ``save_mask_case`` to write a per-mask summary JSON.
+    """
     add_source_paths(source_root)
     from shared.data_utils import compute_ratio  # noqa: WPS433
     from baseline_utils import (  # noqa: WPS433
@@ -66,6 +73,7 @@ def load_filtered_data(source_root: str, h5ad: str, threshold: int, min_depth: i
 
 
 def random_entry_mask(observed: np.ndarray, frac: float, seed: int) -> np.ndarray:
+    """Pick ``frac`` of all observed entries uniformly at random as the val mask."""
     rng = np.random.default_rng(seed)
     idx = np.argwhere(observed)
     n = int(idx.shape[0] * frac)
@@ -78,6 +86,13 @@ def random_entry_mask(observed: np.ndarray, frac: float, seed: int) -> np.ndarra
 
 
 def per_site_mask(observed: np.ndarray, frac: float, seed: int, min_train_per_site: int) -> np.ndarray:
+    """Per-site stratified random mask.
+
+    Within each site (column), independently picks ``frac`` of its observed
+    entries for the val mask, while leaving at least ``min_train_per_site``
+    observed entries visible to training. This is the strategy used by the
+    project's main reporting masks (``per_site_random_{20,40,60}``).
+    """
     rng = np.random.default_rng(seed)
     val = np.zeros_like(observed, dtype=bool)
     for site in range(observed.shape[1]):
@@ -99,6 +114,13 @@ def high_ratio_stratified_mask(
     high_threshold: float,
     high_fraction: float,
 ) -> np.ndarray:
+    """Holdout sample stratified by GT ratio strength.
+
+    Half (``high_fraction``) of the holdout entries are drawn from cells with
+    ``gt_ratio >= high_threshold`` and the rest from below-threshold cells, so
+    the val mask over-represents the high-signal region of the editing
+    distribution. Used to stress-test methods on harder editing patterns.
+    """
     rng = np.random.default_rng(seed)
     obs_idx = np.argwhere(observed)
     total = int(obs_idx.shape[0] * frac)
@@ -127,6 +149,14 @@ def site_drop_mask(
     min_site_observed: int,
     max_sites: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Holdout the entirety of a small set of high-signal sites.
+
+    Ranks sites by ``99th-percentile gt_ratio + 0.001 * coverage`` and selects
+    the top sites until either ``target_frac * total_observed_entries`` or
+    ``max_sites`` is reached. Returns ``(val_mask, selected_site_indices)``.
+    Tests how well a method generalises when entire columns disappear from
+    training, rather than scattered cells.
+    """
     rng = np.random.default_rng(seed)
     site_support = observed.sum(axis=0)
     site_peak = np.nanpercentile(np.nan_to_num(gt_ratio, nan=0.0), 99, axis=0)
@@ -158,6 +188,13 @@ def complete_observed_block(
     block_spots: int,
     block_sites: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Find a sub-block of spots and sites where every cell is observed.
+
+    Picks the highest-coverage spots first (falling back to smaller blocks if
+    the requested ``block_spots`` cannot yield enough fully-observed columns)
+    and ranks the columns by a combined variance, positive-fraction, and 99th
+    percentile score. Returns ``(rows, cols)`` indices defining the block.
+    """
     row_cov = observed.sum(axis=1)
     rows = np.argsort(-row_cov)[:block_spots]
     complete_cols = np.where(observed[rows].all(axis=0))[0]
@@ -186,6 +223,12 @@ def spatial_block_mask(
     block_spots: int,
     block_sites: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Holdout an entire dense observed sub-block (rows x cols).
+
+    Wraps :func:`complete_observed_block` and converts the chosen rows/cols
+    into a boolean val mask. Returns ``(val_mask, rows, cols)``. Useful for
+    evaluating methods on a fully missing-at-random rectangular patch.
+    """
     rows, cols = complete_observed_block(observed, gt_ratio, block_spots, block_sites)
     val = np.zeros_like(observed, dtype=bool)
     if rows.size and cols.size:
@@ -195,10 +238,12 @@ def spatial_block_mask(
 
 
 def train_ratio_from_mask(gt_ratio: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
+    """Return ``gt_ratio`` masked so non-train cells are NaN (float32)."""
     return np.where(train_mask, gt_ratio, np.nan).astype(np.float32)
 
 
 def write_index_csv(path: str, values: Iterable[int], column: str) -> None:
+    """Write a one-column CSV of integer indices (used for selected_spots / sites)."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([column])
@@ -213,6 +258,13 @@ def save_mask_case(
     val_mask: np.ndarray,
     metadata: Dict,
 ) -> None:
+    """Persist one mask case (train/val/observed/gt) plus a JSON summary.
+
+    Creates ``<out_dir>/<name>/`` containing the four boolean / float arrays,
+    optional ``selected_spots.csv`` / ``selected_sites.csv`` index lists, and
+    a ``mask_summary.json`` recording mask kind, holdout fractions, depth
+    stats, and any case-specific metadata.
+    """
     case_dir = os.path.join(out_dir, name)
     os.makedirs(case_dir, exist_ok=True)
     observed = data["observed_mask"]
@@ -249,6 +301,15 @@ def save_mask_case(
 
 
 def main() -> None:
+    """CLI entry point: write all mask cases for one sample under ``--out_dir``.
+
+    Generates a fixed catalog of mask cases (random_{10,30,50,60},
+    per_site_random_{20,30,40,60}, high_ratio_stratified, site_drop,
+    spatial_block, mixed_hard) under ``<out_dir>/<case_name>/``. Each case
+    saves train/val/observed/gt arrays plus a per-case JSON summary; the
+    train/val arrays are guaranteed to satisfy the project's mask contract
+    ``train_mask | val_mask == observed_mask``.
+    """
     ap = argparse.ArgumentParser(description="Generate shared harder masks for sample 151673.")
     ap.add_argument("--source_root", default=DEFAULT_SOURCE_ROOT)
     ap.add_argument("--h5ad", default=os.path.join(DEFAULT_SOURCE_ROOT, "data", "151673", "adata_ai_compressed.h5ad"))

@@ -48,6 +48,11 @@ COLORS = {
 
 
 def read_data(root: str, ratios: list[int]):
+    """Load per-ratio ``layered_metrics.csv`` files for sample 151673.
+
+    Returns ``data[ratio][(method, layer, metric)] = float``. Missing rows
+    are skipped silently; the caller's plotting code handles gaps.
+    """
     data = {ratio: {} for ratio in ratios}
     for ratio in ratios:
         path = os.path.join(
@@ -73,18 +78,26 @@ def read_data(root: str, ratios: list[int]):
 
 
 def signed_improvement(mean_value: float, model_value: float, direction: str) -> float:
+    """Return ``model_value - mean_value`` flipped so positive = better.
+
+    For ``direction == 'lower'`` (RMSE/MAE), better means smaller, so the
+    sign is inverted; for ``'higher'`` (cosine/PCC) the raw difference is
+    already positive when better.
+    """
     if direction == "lower":
         return mean_value - model_value
     return model_value - mean_value
 
 
 def rank_values(values: dict[str, float], direction: str) -> dict[str, int]:
+    """Rank methods 1..N at one (ratio, layer, metric); 1 is best for the given direction."""
     reverse = direction == "higher"
     ordered = sorted(values.items(), key=lambda x: x[1], reverse=reverse)
     return {method: idx + 1 for idx, (method, _value) in enumerate(ordered)}
 
 
 def plot_rank_heatmap(data, ratios, out_dir):
+    """Render a ranks-by-method-and-(layer/metric) heatmap PNG."""
     fig, axes = plt.subplots(len(LAYERS), len(METRICS), figsize=(16, 7.8), constrained_layout=True)
     for row_idx, layer in enumerate(LAYERS):
         for col_idx, (metric, label, direction) in enumerate(METRICS):
@@ -113,6 +126,7 @@ def plot_rank_heatmap(data, ratios, out_dir):
 
 
 def plot_delta_vs_mean(data, ratios, out_dir):
+    """Render ``model_metric - mean_baseline_metric`` curves vs mask ratio."""
     fig, axes = plt.subplots(len(LAYERS), len(METRICS), figsize=(16, 7.8), constrained_layout=True)
     x = [r / 100 for r in ratios]
     compare_methods = [m for m in METHODS if m != "Mean Baseline"]
@@ -141,6 +155,7 @@ def plot_delta_vs_mean(data, ratios, out_dir):
 
 
 def plot_raw_lines(data, ratios, out_dir):
+    """Render raw metric curves vs mask ratio (the line plot used in notebook Section 5)."""
     fig, axes = plt.subplots(len(LAYERS), len(METRICS), figsize=(16, 7.8), constrained_layout=True)
     x = [r / 100 for r in ratios]
     for row_idx, layer in enumerate(LAYERS):
@@ -165,6 +180,7 @@ def plot_raw_lines(data, ratios, out_dir):
 
 
 def write_summary_csv(data, ratios, out_dir):
+    """Write the long-form summary CSV that backs the line and heatmap figures."""
     path = os.path.join(out_dir, "selected_models_mask_ratio_summary.csv")
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -197,6 +213,7 @@ def write_summary_csv(data, ratios, out_dir):
 
 
 def main():
+    """CLI entry point: load metrics, write the summary CSV, render the three figures."""
     parser = argparse.ArgumentParser(description="Plot selected model comparisons across mask ratios.")
     parser.add_argument("--root", default=PROJECT_ROOT)
     parser.add_argument("--ratios", default="20,40,60")

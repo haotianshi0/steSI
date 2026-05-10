@@ -21,6 +21,12 @@ PYTHON = sys.executable
 
 
 def run_cmd(cmd: List[str], cwd: str, dry_run: bool = False, label: str | None = None) -> None:
+    """Run a subprocess command with consistent logging and dry-run support.
+
+    Echoes the full command with proper quoting before execution. When
+    ``dry_run`` is True, the command is only logged and not executed (useful
+    for sanity-checking pipelines without producing artifacts).
+    """
     name = label or os.path.basename(cmd[1]) if len(cmd) > 1 else "command"
     print(f"[Run] {name}: " + " ".join(f'"{x}"' if " " in x else x for x in cmd), flush=True)
     if dry_run:
@@ -35,17 +41,30 @@ def run_cmd(cmd: List[str], cwd: str, dry_run: bool = False, label: str | None =
 
 
 def format_mask_name(mask_name: str, mask_seed: int, model_seed: int) -> str:
+    """Substitute ``{seed}``, ``{mask_seed}``, ``{model_seed}`` into a mask name template."""
     return mask_name.format(seed=mask_seed, mask_seed=mask_seed, model_seed=model_seed)
 
 
-def default_run_name(sample_id: str, mask_seed: int, model_seed: int, legacy_seed: int, epochs: int, resolved_mask_name: str) -> str:
+def default_run_name(sample_id: str, mask_seed: int, model_seed: int, base_seed: int, epochs: int, resolved_mask_name: str) -> str:
+    """Build the default run directory name.
+
+    For the main sample (151673), the sample prefix is omitted to keep the
+    standard single-seed directory format. When mask/model seeds differ from
+    the base seed, the name embeds both seeds explicitly.
+    """
     sample_prefix = "" if sample_id == "151673" else f"{sample_id}_"
-    if mask_seed == model_seed == legacy_seed:
-        return f"{sample_prefix}seed{legacy_seed}_e{epochs}_{resolved_mask_name}"
+    if mask_seed == model_seed == base_seed:
+        return f"{sample_prefix}seed{base_seed}_e{epochs}_{resolved_mask_name}"
     return f"{sample_prefix}mask{mask_seed}_model{model_seed}_e{epochs}_{resolved_mask_name}"
 
 
 def ensure_masks(args, run_root: str) -> str:
+    """Generate train/val masks if missing and return the path to the mask case directory.
+
+    When ``--shared_mask_cache`` is enabled, masks are produced once per
+    (sample_id, mask_seed) under ``results/shared_masks/`` and reused across
+    runs; otherwise they are written inside ``run_root``.
+    """
     masks_root = (
         os.path.join(PROJECT_ROOT, "results", "shared_masks", args.sample_id, f"masks_seed{args.mask_seed}")
         if args.shared_mask_cache
@@ -66,6 +85,12 @@ def ensure_masks(args, run_root: str) -> str:
 
 
 def parse_models(value: str) -> set[str]:
+    """Parse ``--models`` (comma-separated) into the set of canonical model keys.
+
+    Recognises multiple spellings (``mean``, ``mean_baseline``; ``knn``,
+    ``spatial_knn``; ``airgate``, ``airgate_st``; etc.). The literal
+    ``all`` short-circuits to the full 7-method set.
+    """
     aliases = {
         "all": "all",
         "mean": "mean",
@@ -108,6 +133,7 @@ def parse_models(value: str) -> set[str]:
 
 
 def write_registry(path: str, rows: List[tuple[str, str]]) -> None:
+    """Write a ``method,pred_path`` CSV consumed by metrics and plotting scripts."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -117,6 +143,13 @@ def write_registry(path: str, rows: List[tuple[str, str]]) -> None:
 
 
 def prediction_file_valid(pred_path: str, mask_dir: str) -> bool:
+    """Quick check that an existing prediction file is safe to skip-rerun.
+
+    Verifies shape match against ``gt_ratio.npy``, finiteness on observed
+    cells, range ``[0, 1]`` on finite predictions, and exact preservation of
+    training-visible ground-truth values. Returns ``True`` only if all
+    checks pass.
+    """
     if not os.path.exists(pred_path):
         return False
     try:
@@ -141,6 +174,7 @@ def prediction_file_valid(pred_path: str, mask_dir: str) -> bool:
 
 
 def configure_cpu_threads(cpu_threads: int) -> int:
+    """Pin BLAS / OpenMP / NumExpr thread counts for reproducible CPU runs."""
     workers = cpu_threads if cpu_threads > 0 else max(1, os.cpu_count() or 1)
     for key in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"]:
         os.environ[key] = str(workers)
@@ -148,6 +182,25 @@ def configure_cpu_threads(cpu_threads: int) -> int:
 
 
 def main() -> None:
+    """CLI entry point: orchestrate the full benchmark for one (sample, mask, seed) triple.
+
+    Steps:
+
+      1. Configure CPU threading and resolve the seed triple.
+      2. Generate or reuse the shared train/val masks for the sample.
+      3. Run the requested baseline group (Mean / SoftImpute / MI / Spatial
+         KNN / Spatial IDW) and the requested neural models (AIRGate-ST,
+         AIRDiff-ST), writing each method's ``pred_ratio.npy``.
+      4. Write a run-specific ``model_registry.csv`` mapping method names to
+         their prediction files.
+      5. Invoke ``evaluation/collect_layered_metrics.py`` to score every
+         method on every layer.
+      6. Optionally call ``visualization/generate_all_dual_blocks.py`` for
+         qualitative dual-block heatmaps (skipped with ``--skip_dual_block``).
+
+    Honours ``--dry_run`` for a no-op rehearsal that still validates paths
+    and ``--skip_existing`` for resuming partially-completed runs.
+    """
     ap = argparse.ArgumentParser(description="Run the 7-model spatial imputation benchmark with one shared external mask.")
     ap.add_argument("--sample_id", default="151673", help="Dataset/sample id under data/<sample_id>, e.g. 151507.")
     ap.add_argument("--h5ad", default=None, help="Optional explicit h5ad path. Defaults to data/{sample_id}/adata_ai_compressed.h5ad.")
@@ -161,7 +214,7 @@ def main() -> None:
         default="per_site_random_60_seed{seed}",
         help="Mask subdir name, e.g. per_site_random_60_seed{seed}. Supports {seed}, {mask_seed}, {model_seed}.",
     )
-    ap.add_argument("--run_name", default=None, help="Default keeps legacy seed format when mask/model seeds are equal; otherwise uses mask{mask_seed}_model{model_seed}.")
+    ap.add_argument("--run_name", default=None, help="Default keeps the standard seed format when mask/model seeds are equal; otherwise uses mask{mask_seed}_model{model_seed}.")
     ap.add_argument("--models", default="all", help="Comma-separated model keys to run/register, or all.")
     ap.add_argument("--skip_dual_block", action="store_true", help="Skip dual-block heatmap generation.")
     ap.add_argument("--shared_mask_cache", action="store_true", help="Store/reuse masks under results/shared_masks by mask_seed.")

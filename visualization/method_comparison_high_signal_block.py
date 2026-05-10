@@ -62,12 +62,14 @@ SHORT_LABEL: Dict[str, str] = {
 
 
 def _resolve(path: str) -> str:
+    """Return ``path`` unchanged if absolute, else resolve relative to the project root."""
     if os.path.isabs(path):
         return path
     return os.path.abspath(os.path.join(REPO_ROOT, path))
 
 
 def read_registry(run_dir: str) -> Dict[str, str]:
+    """Return ``{method: pred_path}`` for the seven core methods, raising on missing rows."""
     registry_path = os.path.join(run_dir, "model_registry.csv")
     if not os.path.exists(registry_path):
         raise FileNotFoundError(f"model_registry.csv not found under {run_dir}")
@@ -86,6 +88,7 @@ def read_registry(run_dir: str) -> Dict[str, str]:
 
 
 def load_shared_arrays(baselines_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load ``gt_ratio.npy``, ``train_ratio.npy``, ``val_mask.npy`` from ``baselines_dir``."""
     gt = np.load(os.path.join(baselines_dir, "gt_ratio.npy")).astype(np.float32)
     train = np.load(os.path.join(baselines_dir, "train_ratio.npy")).astype(np.float32)
     val_mask = np.load(os.path.join(baselines_dir, "val_mask.npy")).astype(bool)
@@ -93,6 +96,7 @@ def load_shared_arrays(baselines_dir: str) -> Tuple[np.ndarray, np.ndarray, np.n
 
 
 def load_pred(method: str, pred_path: str, expected_shape: Tuple[int, int]) -> np.ndarray:
+    """Load a method's ``pred_ratio.npy`` and verify it has the expected shape."""
     arr = np.load(_resolve(pred_path)).astype(np.float32)
     if arr.shape != expected_shape:
         raise ValueError(
@@ -109,6 +113,13 @@ def draw_3x3_panels(
     vmin: float = 0.0,
     vmax: float = 1.0,
 ) -> None:
+    """Render a 3x3 grid of magma heatmaps sharing a single colorbar.
+
+    Each panel reorders its columns by ``col_order`` so all 9 panels share
+    the same column layout. NaN cells appear light grey. The figure aspect
+    matches the original 1x3 dual-block panels: each cell is roughly 4 wide
+    by 7 tall in inches, giving the 3x3 figure a portrait orientation.
+    """
     if len(panels) != 9:
         raise ValueError(f"Expected 9 panels, got {len(panels)}")
 
@@ -148,6 +159,13 @@ def draw_3x3_panels(
 
 
 def main() -> None:
+    """CLI entry point: build the 3x3 panel and save it as a single PNG.
+
+    Loads the registry, picks the high-signal sub-block once from the GT
+    via :func:`select_block`, and renders ``GT``, ``Masked Train``, plus the
+    seven core methods' predictions in a fixed 3x3 reading order ending at
+    AIRGate-ST and AIRDiff-ST.
+    """
     ap = argparse.ArgumentParser(
         description="3x3 method-comparison heatmap on a high-signal observed-only block."
     )

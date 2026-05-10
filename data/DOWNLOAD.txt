@@ -1,0 +1,25 @@
+This directory is empty in the GitHub repository / submitted archive because
+the 12 AnnData (.h5ad) files used by the artifact total roughly 711 MB and
+exceed the standard submission size limit.
+
+The data is hosted as a shared folder on Google Drive:
+
+    https://drive.google.com/drive/folders/1zBNEj5hOk-h4vSlLV7Ed-rYxFu-d0JRd?usp=drive_link
+
+After downloading, extract the contents into this directory so that the final
+layout is exactly:
+
+    data/
+      <sample_id>/
+        adata_ai_compressed.h5ad
+
+Sample IDs included:
+    151507, 151508, 151509, 151510,
+    151669, 151670, 151671, 151672,
+    151673, 151674, 151675, 151676
+
+If you already have the .h5ad files locally from a previous copy of the
+repository, place them at data/<sample_id>/adata_ai_compressed.h5ad and skip
+the download.
+
+For more context, see the "Data" section of the project README.md.

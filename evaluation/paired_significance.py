@@ -1,3 +1,17 @@
+"""Paired-bootstrap significance tests between models on shared holdout cells.
+
+For every (layer, metric) pair, compares each non-baseline method against a
+designated baseline (default: Mean Baseline) using their predictions on the
+same set of valid holdout cells. The test resamples cells with replacement,
+recomputes the metric difference per replicate, and reports an empirical
+two-sided 95% confidence interval and a p-value approximating
+``P(model worse than baseline)`` under the bootstrap distribution.
+
+Cells where either prediction or the ground truth is non-finite are dropped
+before bootstrapping. Output is one row per ``(method, layer, metric)``
+combination, written as both CSV and JSON for downstream tabling.
+"""
+
 import argparse
 import csv
 import json
@@ -15,6 +29,7 @@ from collect_layered_metrics import layer_masks, read_model_registry  # noqa: E4
 
 
 def metric_scores(pred: np.ndarray, gt: np.ndarray) -> Dict[str, float]:
+    """Compute RMSE, MAE, cosine, Pearson r on flat 1-D paired arrays."""
     pred = pred.astype(np.float64)
     gt = gt.astype(np.float64)
     rmse = float(np.sqrt(np.mean((pred - gt) ** 2)))
@@ -29,6 +44,7 @@ def metric_scores(pred: np.ndarray, gt: np.ndarray) -> Dict[str, float]:
 
 
 def paired_diffs(model_pred: np.ndarray, base_pred: np.ndarray, gt: np.ndarray) -> Dict[str, float]:
+    """Return (model_metric - baseline_metric) for each of the four metrics."""
     model_scores = metric_scores(model_pred, gt)
     base_scores = metric_scores(base_pred, gt)
     return {
@@ -48,6 +64,13 @@ def bootstrap_metric(
     sample_size: int,
     rng: np.random.Generator,
 ) -> tuple[float, float, float, float]:
+    """Run a paired bootstrap and return ``(observed_diff, ci95_low, ci95_high, p_better)``.
+
+    ``p_better`` uses the appropriate inequality for the metric direction
+    (RMSE/MAE: lower is better; cosine/PCC: higher is better) and includes
+    the standard +1 smoothing to avoid zero-probability outputs at small
+    iteration counts.
+    """
     observed = paired_diffs(model_pred, base_pred, gt)[metric]
     n = gt.shape[0]
     boot_n = min(n, sample_size) if sample_size > 0 else n
@@ -67,6 +90,14 @@ def bootstrap_metric(
 
 
 def main() -> None:
+    """CLI entry point: run the paired bootstrap for every method against ``--baseline``.
+
+    Loads the GT, val mask, and per-method predictions from the run-specific
+    ``model_registry.csv``, builds the same layered evaluation as
+    ``collect_layered_metrics.py``, and writes
+    ``paired_significance.csv`` / ``paired_significance.json`` under
+    ``--out_dir``.
+    """
     parser = argparse.ArgumentParser(description="Paired bootstrap significance tests for models sharing the same holdout cells.")
     parser.add_argument("--mask_dir", required=True)
     parser.add_argument("--model_registry", required=True)

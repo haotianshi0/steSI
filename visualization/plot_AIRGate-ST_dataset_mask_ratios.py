@@ -1,3 +1,15 @@
+"""AIRGate-ST cross-dataset summary across the 20% / 40% / 60% mask ratios.
+
+Aggregates AIRGate-ST's per-(dataset, ratio) metrics into:
+
+  * a heatmap showing which (dataset, ratio) combinations have results,
+  * a per-ratio box-and-scatter chart over datasets,
+  * a per-dataset line plot over the three ratios.
+
+Each figure focuses solely on AIRGate-ST so the project's primary model
+can be inspected without the noise of the other six methods.
+"""
+
 import argparse
 import csv
 import os
@@ -23,6 +35,7 @@ RATIOS = [20, 40, 60]
 
 
 def parse_result_dir(name: str):
+    """Return ``(sample_id, ratio)`` if the run-directory name matches the expected pattern."""
     if not (re.match(r"151\d{3}_seed\d+_e100_per_site_random_", name) or name.startswith("seed1531_e100_per_site_random_")):
         return None
     ratio_match = re.search(r"per_site_random_(20|40|60)_seed", name)
@@ -35,6 +48,7 @@ def parse_result_dir(name: str):
 
 
 def read_airgate_rows(root: str):
+    """Read every available (sample, ratio) AIRGate-ST result row from ``results/``."""
     rows = []
     results_dir = os.path.join(root, "results")
     for name in os.listdir(results_dir):
@@ -63,6 +77,7 @@ def read_airgate_rows(root: str):
 
 
 def write_summary(rows, out_dir):
+    """Write the long-form per-row summary CSV that backs all three figures."""
     path = os.path.join(out_dir, "AIRGate-ST_dataset_mask_ratio_summary.csv")
     with open(path, "w", newline="", encoding="utf-8") as f:
         fieldnames = ["sample_id", "mask_ratio", "layer", "n"] + [m[0] for m in METRICS]
@@ -74,6 +89,7 @@ def write_summary(rows, out_dir):
 
 
 def plot_availability(rows, out_dir):
+    """Render a (sample x ratio) presence heatmap for AIRGate-ST runs."""
     samples = sorted({row["sample_id"] for row in rows})
     available = {(row["sample_id"], row["mask_ratio"]) for row in rows}
     mat = np.zeros((len(samples), len(RATIOS)), dtype=float)
@@ -98,6 +114,7 @@ def plot_availability(rows, out_dir):
 
 
 def plot_box_scatter(rows, out_dir):
+    """Render box + scatter charts of AIRGate-ST metrics across datasets, one per ratio."""
     by_key = defaultdict(list)
     for row in rows:
         by_key[(row["layer"], row["mask_ratio"])].append(row)
@@ -148,6 +165,7 @@ def plot_box_scatter(rows, out_dir):
 
 
 def plot_dataset_lines(rows, out_dir):
+    """Render per-dataset metric curves over the three ratios, one line per sample."""
     data = defaultdict(dict)
     for row in rows:
         data[(row["sample_id"], row["layer"], row["mask_ratio"])] = row
@@ -184,6 +202,7 @@ def plot_dataset_lines(rows, out_dir):
 
 
 def main():
+    """CLI entry point: collect rows, write the summary CSV, render the three figures."""
     parser = argparse.ArgumentParser(description="Plot AIRGate-ST metrics per dataset across mask ratios.")
     parser.add_argument("--root", default=PROJECT_ROOT)
     parser.add_argument("--out_dir", default=os.path.join(PROJECT_ROOT, "results", "visualization", "AIRGate-ST_dataset_mask_ratios"))

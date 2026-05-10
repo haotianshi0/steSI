@@ -1,3 +1,12 @@
+"""Per-method mask-ratio metric curves (auxiliary to the selected-models line plot).
+
+Loads ``layered_metrics.csv`` for sample 151673 at the 20% / 40% / 60%
+ratios and writes one PNG per method. Each PNG shows the four metrics
+(MAE, RMSE, PCC, Cosine) as separate lines vs mask ratio for each layer.
+Useful when inspecting a single method's behaviour without overlapping
+curves from other methods.
+"""
+
 import argparse
 import csv
 import os
@@ -20,6 +29,7 @@ METRICS = [
 
 
 def safe_name(value: str) -> str:
+    """Sanitise a method label into a filesystem-safe lowercase identifier."""
     value = value.lower()
     value = re.sub(r"\(.*?\)", "", value)
     value = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
@@ -27,6 +37,10 @@ def safe_name(value: str) -> str:
 
 
 def read_metrics(root: str, ratios: list[int]) -> dict[str, dict[str, dict[int, dict[str, float]]]]:
+    """Load per-ratio metric rows for sample 151673 into a nested dict.
+
+    Returns ``data[method][layer][ratio] = {metric: float, ...}``.
+    """
     data = defaultdict(lambda: defaultdict(dict))
     for ratio in ratios:
         path = os.path.join(
@@ -53,6 +67,11 @@ def plot_method(method: str,
                 ratios: list[int],
                 layers: list[str],
                 out_dir: str) -> str:
+    """Render one PNG plotting all four metrics vs mask ratio for ``method``.
+
+    Subplots correspond to the requested ``layers`` (e.g. ``all_holdout``
+    and ``gt_positive``); each subplot overlays MAE, RMSE, PCC, and Cosine.
+    """
     n_layers = len(layers)
     fig, axes = plt.subplots(1, n_layers, figsize=(5.0 * n_layers, 4.2), constrained_layout=True)
     if n_layers == 1:
@@ -93,6 +112,7 @@ def plot_method(method: str,
 
 
 def main() -> None:
+    """CLI entry point: load metrics and render one PNG per method into ``--out_dir``."""
     parser = argparse.ArgumentParser(description="Plot metrics vs mask ratio, one figure per method.")
     parser.add_argument("--root", default=PROJECT_ROOT)
     parser.add_argument("--out_dir", default=os.path.join(PROJECT_ROOT, "results", "visualization", "mask_ratio_metrics"))

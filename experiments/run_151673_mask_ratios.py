@@ -1,3 +1,12 @@
+"""Sweep the main reporting mask ratios (20%, 40%, 60%) on sample 151673.
+
+Driver script that calls ``run_harder_benchmark.py`` once per ratio with a
+fixed seed (1531) and the full 7-model set, redirecting stdout / stderr to
+per-ratio log files under ``results/``. Used to produce the per-mask-ratio
+``layered_metrics.csv`` files consumed by
+``visualization/plot_selected_models_mask_ratio.py``.
+"""
+
 import os
 import subprocess
 import sys
@@ -8,10 +17,16 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def stamp() -> str:
+    """Return the current local time as ``YYYY-MM-DD HH:MM:SS`` for log lines."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main() -> int:
+    """Run the 20% / 40% / 60% mask-ratio sweep for sample 151673.
+
+    Aborts on the first non-zero return code from any benchmark invocation.
+    Returns the subprocess exit code (0 on full success).
+    """
     ratios = [20, 40, 60]
     seed = 1531
     epochs = 100

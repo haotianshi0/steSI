@@ -1,3 +1,12 @@
+"""Cross-dataset AIRGate-ST sweep at 20% and 40% mask ratios.
+
+Driver script that calls ``run_harder_benchmark.py`` for the eleven
+non-151673 samples, training only ``AIRGate-ST`` (the project's primary
+model). Used to extend the per-dataset coverage of the boxplot/line-plot
+summaries beyond the main sample. Sample-specific seeds are encoded in the
+``JOBS`` table.
+"""
+
 import os
 import subprocess
 import sys
@@ -23,10 +32,16 @@ RATIOS = [20, 40]
 
 
 def stamp() -> str:
+    """Return the current local time as ``YYYY-MM-DD HH:MM:SS`` for log lines."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main() -> int:
+    """Run AIRGate-ST across the cross-dataset (sample, ratio) grid.
+
+    Aborts at the first non-zero exit code. Returns the subprocess exit
+    code (0 on full success).
+    """
     epochs = 100
     device = "cuda"
     os.makedirs(os.path.join(PROJECT_ROOT, "results"), exist_ok=True)

@@ -1,3 +1,14 @@
+"""Method-comparison boxplot across the available datasets at one mask ratio.
+
+Scans ``results/`` for run directories whose name encodes the requested
+mask-ratio token (e.g. ``per_site_random_60_seed*``), reads each run's
+``metrics/layered_metrics.csv``, restricts to the seven core methods, and
+draws a 2 x 4 grid of boxplots: rows are the ``all_holdout`` and
+``gt_positive`` evaluation layers; columns are RMSE, MAE, cosine, PCC.
+Also writes a long-form ``method_comparison_boxplot_summary.csv`` that
+contains the underlying per-(sample, method, layer) numbers.
+"""
+
 import argparse
 import csv
 import os
@@ -40,6 +51,7 @@ METRICS = [
 
 
 def parse_result_dir(name: str, ratio: int):
+    """Return the sample id encoded in a run-directory name, or ``None`` if it does not match the ratio."""
     ratio_token = f"per_site_random_{ratio}_seed"
     if ratio_token not in name:
         return None
@@ -52,6 +64,12 @@ def parse_result_dir(name: str, ratio: int):
 
 
 def read_rows(root: str, ratio: int, methods: list[str], layers: list[str]) -> list[dict]:
+    """Collect one row per (sample, method, layer) at the requested mask ratio.
+
+    Iterates the run directories under ``results/`` and, for every method in
+    ``methods`` whose layer is in ``layers``, returns its scalar metrics from
+    the per-run ``layered_metrics.csv``.
+    """
     results_dir = os.path.join(root, "results")
     by_key = {}
     for name in sorted(os.listdir(results_dir)):
@@ -81,6 +99,7 @@ def read_rows(root: str, ratio: int, methods: list[str], layers: list[str]) -> l
 
 
 def write_summary(rows: list[dict], out_dir: str) -> str:
+    """Write the long-form per-row summary CSV that backs the boxplot."""
     path = os.path.join(out_dir, "method_comparison_boxplot_summary.csv")
     fieldnames = ["sample_id", "result_dir", "mask_ratio", "method", "layer", "n"] + [m[0] for m in METRICS]
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -92,6 +111,7 @@ def write_summary(rows: list[dict], out_dir: str) -> str:
 
 
 def values_by_method(rows: list[dict], layer: str, metric: str, methods: list[str]) -> list[list[float]]:
+    """Group ``rows`` into one list of per-sample metric values per method, in ``methods`` order."""
     grouped = defaultdict(list)
     for row in rows:
         if row["layer"] == layer:
@@ -100,6 +120,12 @@ def values_by_method(rows: list[dict], layer: str, metric: str, methods: list[st
 
 
 def plot_boxplots(rows: list[dict], methods: list[str], layers: list[str], out_dir: str, ratio: int) -> str:
+    """Render the 2 x 4 boxplot grid (layers x metrics) and return its PNG path.
+
+    AIRGate-ST and AIRDiff-ST boxes are highlighted in orange; baselines
+    appear in light blue. Individual sample points are jittered onto each
+    box so the underlying spread is visible.
+    """
     fig, axes = plt.subplots(len(layers), len(METRICS), figsize=(4.2 * len(METRICS), 4.2 * len(layers)), constrained_layout=True)
     if len(layers) == 1:
         axes = np.asarray([axes])
@@ -153,6 +179,7 @@ def plot_boxplots(rows: list[dict], methods: list[str], layers: list[str], out_d
 
 
 def main() -> None:
+    """CLI entry point: collect rows, write the summary CSV, render the boxplot PNG."""
     parser = argparse.ArgumentParser(description="Compare methods with boxplots across datasets for one mask ratio.")
     parser.add_argument("--root", default=PROJECT_ROOT)
     parser.add_argument("--ratio", type=int, default=60)

@@ -1,3 +1,18 @@
+"""Multi-seed driver: run the benchmark across several model seeds and aggregate.
+
+Trains the same model lineup at one fixed mask seed and several model seeds,
+then aggregates the per-run ``layered_metrics.csv`` files into mean / std
+summaries. Optionally chains:
+
+  * ``build_prediction_ensemble.py`` to build a per-method ensemble
+    prediction by averaging across seeds, and
+  * ``evaluation/paired_significance.py`` to run paired-bootstrap tests
+    against an ensemble baseline.
+
+The script writes a single ``seed_ensemble_summary.json`` describing every
+artifact it produced.
+"""
+
 import argparse
 import csv
 import json
@@ -16,6 +31,7 @@ METRIC_FIELDS = ["n", "rmse", "mae", "cos", "pearson_r"]
 
 
 def parse_seeds(value: str) -> List[int]:
+    """Parse a comma-separated seed list into a list of ints (rejects empty)."""
     seeds = [int(x.strip()) for x in value.split(",") if x.strip()]
     if not seeds:
         raise ValueError("--seeds must contain at least one integer seed")
@@ -23,6 +39,7 @@ def parse_seeds(value: str) -> List[int]:
 
 
 def run_cmd(cmd: List[str], cwd: str, label: str, dry_run: bool) -> None:
+    """Echo and execute a subprocess command, honouring ``dry_run``."""
     print(f"[Run] {label}: " + " ".join(f'"{x}"' if " " in x else x for x in cmd), flush=True)
     if dry_run:
         print(f"[DryRun] {label}", flush=True)
@@ -36,16 +53,19 @@ def run_cmd(cmd: List[str], cwd: str, label: str, dry_run: bool) -> None:
 
 
 def format_mask_name(mask_name: str, mask_seed: int, model_seed: int) -> str:
+    """Substitute ``{seed}``/``{mask_seed}``/``{model_seed}`` in a mask-name template."""
     return mask_name.format(seed=mask_seed, mask_seed=mask_seed, model_seed=model_seed)
 
 
 def run_name_for(sample_id: str, mask_seed: int, model_seed: int, epochs: int, mask_name: str) -> str:
+    """Compose the per-(mask_seed, model_seed) run directory name."""
     resolved_mask = format_mask_name(mask_name, mask_seed, model_seed)
     sample_prefix = "" if sample_id == "151673" else f"{sample_id}_"
     return f"{sample_prefix}mask{mask_seed}_model{model_seed}_e{epochs}_{resolved_mask}"
 
 
 def read_layered_metrics(path: str, mask_seed: int, model_seed: int) -> List[Dict[str, str]]:
+    """Load a per-run ``layered_metrics.csv`` and tag each row with the seeds."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Missing layered metrics: {path}")
     with open(path, newline="", encoding="utf-8") as f:
@@ -57,6 +77,7 @@ def read_layered_metrics(path: str, mask_seed: int, model_seed: int) -> List[Dic
 
 
 def to_float(value: str) -> float:
+    """Best-effort float conversion that returns NaN on parse failure."""
     try:
         out = float(value)
     except (TypeError, ValueError):
@@ -65,10 +86,12 @@ def to_float(value: str) -> float:
 
 
 def finite_values(values: Iterable[float]) -> List[float]:
+    """Filter out NaN / inf entries from an iterable of floats."""
     return [v for v in values if math.isfinite(v)]
 
 
 def aggregate_rows(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+    """Reduce per-(method, layer, seed) rows to mean / std across model seeds."""
     groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         groups[(row["method"], row["layer"])].append(row)
@@ -89,6 +112,7 @@ def aggregate_rows(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
 
 
 def write_csv(path: str, rows: List[Dict[str, object]], fieldnames: List[str]) -> None:
+    """Write ``rows`` to ``path`` as a CSV with the given header order."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -98,6 +122,21 @@ def write_csv(path: str, rows: List[Dict[str, object]], fieldnames: List[str]) -
 
 
 def main() -> None:
+    """CLI entry point: run benchmarks for several model seeds and aggregate.
+
+    Steps:
+
+      1. Run ``run_harder_benchmark.py`` once per model seed at the given
+         mask seed.
+      2. Concatenate every run's ``layered_metrics.csv`` and write a
+         per-seed raw CSV plus a ``mean / std`` summary CSV.
+      3. (Optional) Build a per-method prediction-level ensemble by
+         calling ``build_prediction_ensemble.py``.
+      4. (Optional) Run ``paired_significance.py`` against the ensemble
+         baseline to test each model's ensemble vs the Mean-Baseline
+         ensemble.
+      5. Write a ``seed_ensemble_summary.json`` referencing every artifact.
+    """
     parser = argparse.ArgumentParser(description="Run and aggregate multi-seed spatial imputation benchmarks.")
     parser.add_argument("--sample_id", default="151673", help="Dataset/sample id under data/<sample_id>.")
     parser.add_argument("--h5ad", default=None, help="Optional explicit h5ad path.")

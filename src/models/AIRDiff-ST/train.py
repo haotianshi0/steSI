@@ -1,3 +1,37 @@
+"""
+AIRDiff-ST training entry point.
+
+AIRDiff-ST is a coordinate-level conditional DDPM (denoising diffusion
+probabilistic model) for spatial A-to-I editing ratio imputation. Each entry
+of the spot x site editing matrix is treated as a 1-D scalar that is denoised
+from Gaussian noise conditioned on:
+
+  - learned spot/site embeddings,
+  - sinusoidal time embedding for the diffusion step,
+  - a 9-dimensional condition vector summarising training-visible context
+    (per-site mean, per-spot mean, global mean, normalised observation counts,
+    normalised depths, per-site/per-spot positive-fraction).
+
+Training procedure (per epoch):
+
+  1. Sample a fraction (`--inner_mask_frac`, default 0.6) of training-visible
+     entries and remove them from the condition. The model must denoise the
+     held-out targets without seeing their own values, which mimics the
+     held-out evaluation setting.
+  2. Apply forward noising q_sample(x_0, t, alpha_bar) and predict the noise.
+  3. Use a signal-aware MSE: entries whose ground-truth ratio > 0 get a 2x
+     weight to counter zero-inflation.
+
+Inference uses ancestral DDPM sampling with a linear beta schedule, averaged
+over `--n_samples` independent draws to give a posterior mean prediction (and
+the per-entry standard deviation as an uncertainty proxy).
+
+This file shares its data loader, mask handling, prediction validation, and
+metric utilities with `src/models/AIRGate-ST/shared/data_utils.py`; only the
+model architecture, the conditional context construction, and the diffusion
+training/sampling loops are AIRDiff-ST-specific.
+"""
+
 import argparse
 import os
 import sys
@@ -32,6 +66,14 @@ from inner_mask_utils import make_inner_validation_split  # noqa: E402
 
 
 class TimeEmbedding(nn.Module):
+    """Sinusoidal time-step embedding followed by a 2-layer MLP projection.
+
+    Produces a `dim`-dimensional embedding for diffusion step indices, in the
+    same style as the original DDPM paper. The first half of the dimensions
+    are sin features and the second half are cos features at exponentially
+    spaced frequencies; the result is then refined by a small MLP.
+    """
+
     def __init__(self, dim: int):
         super().__init__()
         self.dim = dim
@@ -42,6 +84,7 @@ class TimeEmbedding(nn.Module):
         )
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
+        """Map an integer step tensor of shape (B,) to embeddings (B, dim)."""
         half = self.dim // 2
         freqs = torch.exp(
             torch.arange(half, device=t.device, dtype=torch.float32)
@@ -55,7 +98,21 @@ class TimeEmbedding(nn.Module):
 
 
 class ConditionalDenoiser(nn.Module):
-    """Coordinate DDPM denoiser conditioned on train-observed summaries."""
+    """Coordinate-level DDPM denoiser conditioned on train-observed summaries.
+
+    The model predicts the noise epsilon added at diffusion step t for a
+    single (spot, site) cell, given:
+
+      - learned spot and site embeddings (lookup by integer id),
+      - sinusoidal time embedding of t,
+      - the noisy scalar x_t at that cell,
+      - a fixed-length condition vector summarising training-visible context
+        for the cell's spot and site (see ``build_condition_features``).
+
+    Architecture: a 4-layer MLP with SiLU activations operating on the
+    concatenation of all inputs. The final scalar output is the predicted
+    noise; loss is signal-weighted MSE against the true noise.
+    """
 
     def __init__(self, n_spots: int, n_sites: int, emb_dim: int = 32, hidden: int = 128):
         super().__init__()
@@ -81,6 +138,18 @@ class ConditionalDenoiser(nn.Module):
         t: torch.Tensor,
         cond_features: torch.Tensor,
     ) -> torch.Tensor:
+        """Predict the noise component for a batch of cells at diffusion step t.
+
+        Args:
+            spot_ids: (B,) long tensor of spot indices.
+            site_ids: (B,) long tensor of site indices.
+            x_t: (B,) noisy scalar values at step t.
+            t: (B,) long tensor of integer diffusion steps.
+            cond_features: (B, 9) condition vector built from training context.
+
+        Returns:
+            (B,) tensor of predicted noise.
+        """
         h = torch.cat(
             [
                 self.spot_emb(spot_ids),
@@ -95,6 +164,11 @@ class ConditionalDenoiser(nn.Module):
 
 
 def make_beta_schedule(steps: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Linear beta schedule from 1e-4 to 2e-2 over ``steps`` diffusion steps.
+
+    Returns ``(beta, alpha, alpha_bar)`` where ``alpha_bar[t]`` is the
+    cumulative product used for closed-form forward noising.
+    """
     beta = torch.linspace(1e-4, 2e-2, steps, device=device)
     alpha = 1.0 - beta
     alpha_bar = torch.cumprod(alpha, dim=0)
@@ -108,6 +182,16 @@ def build_condition_features(
     rows: np.ndarray,
     cols: np.ndarray,
 ) -> np.ndarray:
+    """Construct the 9-dimensional condition vector for a batch of (row, col) cells.
+
+    The condition is computed from values that are visible to training
+    (``train_mask == True``) only: per-site mean ratio, per-spot mean ratio,
+    global mean, normalised log-counts of observations per site/spot,
+    normalised log-depths per site/spot, and per-site/per-spot positive-edit
+    fractions. Missing aggregates fall back to the global mean (or 0 for the
+    positive-fraction features). The result is a (len(rows), 9) float32 array
+    in the same order as ``rows`` and ``cols``.
+    """
     train_values = np.where(train_mask, ratio, np.nan)
     train_depth = np.where(train_mask, depth, np.nan)
 
@@ -156,6 +240,12 @@ def build_condition_features(
 
 
 def q_sample(x0: torch.Tensor, t: torch.Tensor, alpha_bar: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Closed-form forward noising step.
+
+    Returns ``(x_t, noise)`` such that
+    ``x_t = sqrt(alpha_bar[t]) * x0 + sqrt(1 - alpha_bar[t]) * noise``,
+    with ``noise`` drawn from a standard Gaussian.
+    """
     noise = torch.randn_like(x0)
     ab = alpha_bar[t]
     x_t = torch.sqrt(ab) * x0 + torch.sqrt(1.0 - ab) * noise
@@ -171,6 +261,14 @@ def train_epoch(
     alpha_bar: torch.Tensor,
     batch_size: int,
 ) -> float:
+    """Run one diffusion training epoch over ``coords`` cells.
+
+    For each minibatch, samples a random diffusion step ``t``, applies forward
+    noising via :func:`q_sample`, predicts noise with the model, and minimises
+    a signal-weighted MSE (entries with ``x0 > 0`` get a 2x weight to counter
+    zero inflation). Gradients are clipped at norm 5.0. Returns the mean
+    minibatch loss for the epoch.
+    """
     model.train()
     n = coords.shape[0]
     perm = torch.randperm(n, device=x0.device)
@@ -200,7 +298,16 @@ def sample_inner_target_indices(
     high_threshold: float,
     high_weight: float,
 ) -> np.ndarray:
-    """Sample observed train entries to hide from the conditional context."""
+    """Sample observed train entries to hide from the conditional context.
+
+    A fraction ``frac`` of the training cells is selected without replacement
+    each epoch and removed from the condition before they are used as
+    denoising targets. Cells with ``train_x >= high_threshold`` are sampled
+    with weight ``high_weight``, biasing the model toward learning the
+    higher-signal region of the editing distribution.
+
+    Returns an int64 array of selected indices into ``train_x``.
+    """
     n = int(train_x.shape[0])
     if n <= 1:
         return np.arange(n, dtype=np.int64)
@@ -226,6 +333,27 @@ def sample_predictions(
     batch_size: int,
     n_samples: int,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Run ancestral DDPM sampling for the requested coordinates.
+
+    Repeats the reverse process ``n_samples`` times from independent Gaussian
+    initialisations and averages the resulting trajectories. Predictions are
+    clamped to ``[0, 1]`` (the valid range of an editing ratio).
+
+    Args:
+        model: Trained denoiser network.
+        coords_np: (N, 2) int64 array of (spot_id, site_id) pairs to sample.
+        cond_np: (N, 9) float32 condition features for those coordinates.
+        shape: (n_spots, n_sites) shape of the full editing matrix; used to
+            scatter the predictions back into a 2-D array.
+        beta, alpha, alpha_bar: schedule tensors from :func:`make_beta_schedule`.
+        batch_size: Number of cells processed per reverse step.
+        n_samples: Number of independent diffusion samples to average.
+
+    Returns:
+        ``(pred, unc)`` of shape ``shape``; ``pred`` is the per-cell mean
+        prediction and ``unc`` is the per-cell standard deviation across
+        ``n_samples`` runs. Cells outside ``coords_np`` remain NaN in both.
+    """
     model.eval()
     n = coords_np.shape[0]
     samples = []
@@ -260,6 +388,27 @@ def sample_predictions(
 
 
 def main() -> None:
+    """CLI entry point: parse args, train, sample, and write predictions.
+
+    Workflow:
+
+      1. Load A/G count matrices, filter sites, build observed/train/val masks
+         (either from ``--train_mask_path`` / ``--val_mask_path`` or by
+         generating a fresh split via ``train_val_split``).
+      2. Carve an inner-validation slice out of the outer train mask
+         (``inner_val_frac``) so epoch selection is unbiased w.r.t. ``val_mask``.
+      3. Train ``--epochs`` epochs of conditional diffusion. Every 5 epochs,
+         sample on the inner-validation cells and keep the best state by
+         inner-RMSE.
+      4. Restore the best state and sample either the holdout cells (default)
+         or every unobserved cell (``--predict_unobserved``). Training-visible
+         entries are written through with their ground-truth value and the
+         result is validated by ``validate_prediction_output``.
+      5. Save ``pred_ratio.npy``, ``pred_uncertainty.npy``, the train/val
+         masks, the train/fit-train ratio matrices, and a summary
+         ``metrics.txt`` under
+         ``<output_dir>/seed<seed>/``.
+    """
     parser = argparse.ArgumentParser(description="Observed-mask conditional diffusion for ratio imputation.")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--emb_dim", type=int, default=32)

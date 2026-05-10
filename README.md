@@ -27,35 +27,35 @@ Recommended files to inspect, in reading order:
 
 End-to-end walkthrough
 
-- `artifact_walkthrough.ipynb` — eleven-section walkthrough with embedded benchmark figures, smoke-test cell, and synthesis observations.
+- `artifact_walkthrough.ipynb` - eleven-section walkthrough with embedded benchmark figures, smoke-test cell, and synthesis observations.
 
 Reproducibility entry points
 
-- `README.md` — installation, usage, and project overview (this file).
-- `REPRODUCIBILITY.md` — exact commands to reproduce every committed result.
-- `environment.yml` / `requirements.txt` — pinned dependencies.
+- `README.md` - installation, usage, and project overview (this file).
+- `REPRODUCIBILITY.md` - exact commands to reproduce every committed result.
+- `environment.yml` / `requirements.txt` - pinned dependencies.
 
 Pre-rendered benchmark outputs
 
-- `results/notebook_demo/` — three figures (mask-ratio line plot, method-comparison boxplot, 3x3 high-signal block heatmap) plus the two summary CSVs they were rendered from.
+- `results/notebook_demo/` - three figures (mask-ratio line plot, method-comparison boxplot, 3x3 high-signal block heatmap) plus the two summary CSVs they were rendered from.
 
 Project models
 
-- `src/models/AIRGate-ST/train.py` — two-stage gate-and-ratio model (project's primary model).
-- `src/models/AIRDiff-ST/train.py` — conditional diffusion-style ratio imputation model.
-- `src/models/AIRGate-ST/shared/data_utils.py` — shared data loader, KNN graph, and plotting helpers used by every model and the visualization scripts.
+- `src/models/AIRGate-ST/train.py` - two-stage gate-and-ratio model (project's primary model).
+- `src/models/AIRDiff-ST/train.py` - conditional diffusion-style ratio imputation model.
+- `src/models/AIRGate-ST/shared/data_utils.py` - shared data loader, KNN graph, and plotting helpers used by every model and the visualization scripts.
 
 Evaluation and visualization
 
-- `evaluation/collect_layered_metrics.py` — layered metric computation with NaN/zero validation.
-- `visualization/method_comparison_high_signal_block.py` — script behind the 3x3 high-signal heatmap in notebook Section 7.
-- `visualization/plot_method_comparison_boxplots.py` — script behind the boxplot in notebook Section 6.
-- `visualization/plot_selected_models_mask_ratio.py` — script behind the line plot in notebook Section 5.
+- `evaluation/collect_layered_metrics.py` - layered metric computation with NaN/zero validation.
+- `visualization/method_comparison_high_signal_block.py` - script behind the 3x3 high-signal heatmap in notebook Section 7.
+- `visualization/plot_method_comparison_boxplots.py` - script behind the boxplot in notebook Section 6.
+- `visualization/plot_selected_models_mask_ratio.py` - script behind the line plot in notebook Section 5.
 
 Attribution and AI use
 
-- `ATTRIBUTION.md` — original components and open-source dependencies.
-- `AI_USE_DECLARATION.md` — AI assistance declaration.
+- `ATTRIBUTION.md` - original components and open-source dependencies.
+- `AI_USE_DECLARATION.md` - AI assistance declaration.
 
 Recommended sanity command (no GPU, no training):
 
@@ -119,9 +119,9 @@ Spatial Imputation/
 
 The project uses two helper folders with distinct scopes:
 
-- `src/shared/` — `baseline_utils.py` (depth filtering, channel-wise spatial KNN/IDW, randomized-SVD SoftImpute) and `inner_mask_utils.py` (training-side inner validation split). These are used by `src/masks/generate_masks.py`, `src/models/baselines/train.py`, and both neural training scripts.
+- `src/shared/` - `baseline_utils.py` (depth filtering, channel-wise spatial KNN/IDW, randomized-SVD SoftImpute) and `inner_mask_utils.py` (training-side inner validation split). These are used by `src/masks/generate_masks.py`, `src/models/baselines/train.py`, and both neural training scripts.
 
-- `src/models/AIRGate-ST/shared/data_utils.py` — `.h5ad` loading, site filtering, KNN graph construction, train/val mask handling, prediction validation, layered metrics, and heatmap/diagnostic plotting. This module is imported by every model entry point (AIRGate-ST, AIRDiff-ST, baselines), by `src/masks/generate_masks.py`, and by `visualization/dual_block_observed_heatmap.py`. Each importing script adds `src/models/AIRGate-ST/` to `sys.path` and imports through a stable `from shared.data_utils import ...` line, so callers do not depend on AIRGate-ST's training internals.
+- `src/models/AIRGate-ST/shared/data_utils.py` - `.h5ad` loading, site filtering, KNN graph construction, train/val mask handling, prediction validation, layered metrics, and heatmap/diagnostic plotting. This module is imported by every model entry point (AIRGate-ST, AIRDiff-ST, baselines), by `src/masks/generate_masks.py`, and by `visualization/dual_block_observed_heatmap.py`. Each importing script adds `src/models/AIRGate-ST/` to `sys.path` and imports through a stable `from shared.data_utils import ...` line, so callers do not depend on AIRGate-ST's training internals.
 
 `configs/artifact_summary.json` is a compact metadata file that summarizes the model count, retained model names, mask semantics, prediction semantics, and seed semantics. It is not the execution entry point; use the commands below or the protocol in `REPRODUCIBILITY.md` to run experiments.
 

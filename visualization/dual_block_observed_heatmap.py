@@ -1,3 +1,14 @@
+"""Observed-only sub-block heatmaps for one model.
+
+Selects a fully-observed (no NaN) sub-matrix of the editing data using one
+of three modes (``dense``, ``rare_peak``, ``high_signal``) and renders two
+panel figures: a 1x3 ``GT | Masked Train | Pred`` triptych showing the full
+sub-block, and a 1x2 ``GT @ holdout | Pred @ holdout`` view restricted to
+held-out cells. Used both as a CLI tool and as a helper module imported by
+``generate_all_dual_blocks.py`` and
+``method_comparison_high_signal_block.py``.
+"""
+
 import argparse
 import json
 import os
@@ -18,6 +29,7 @@ from shared.data_utils import _cluster_order  # noqa: E402
 
 def draw_panels_gray_nan(arrays, titles, col_order, save_path, suptitle="",
                          vmin=0.0, vmax=1.0):
+    """Render a row of panels sharing a magma colorbar; NaN cells appear light grey."""
     cmap = plt.get_cmap("magma").copy()
     cmap.set_bad("lightgray")
 
@@ -49,6 +61,7 @@ def draw_panels_gray_nan(arrays, titles, col_order, save_path, suptitle="",
 
 
 def _mean_column_order(gt_sub: np.ndarray) -> np.ndarray:
+    """Order columns by descending mean GT (highest-signal columns leftmost)."""
     col_mean = np.nanmean(gt_sub, axis=0)
     col_mean = np.nan_to_num(col_mean, nan=-np.inf)
     return np.argsort(-col_mean)
@@ -58,6 +71,7 @@ def _score_sites(gt_block: np.ndarray,
                  holdout_block: np.ndarray,
                  mode: str,
                  high_signal_threshold: float = 0.05) -> np.ndarray:
+    """Score columns by mode-specific signal richness for sub-block site selection."""
     var_score = np.nanvar(gt_block, axis=0)
     nz_score = np.nanmean(np.nan_to_num(gt_block, nan=0.0) > 0, axis=0)
     holdout_score = holdout_block.sum(axis=0).astype(np.float32)
@@ -88,6 +102,7 @@ def _score_sites(gt_block: np.ndarray,
 def _rank_rows(gt_ratio: np.ndarray,
                mode: str,
                high_signal_threshold: float = 0.05) -> np.ndarray:
+    """Rank spots (rows) by mode-specific desirability for sub-block row selection."""
     observed_mask = ~np.isnan(gt_ratio)
     row_cov = observed_mask.sum(axis=1).astype(np.float32)
     row_vals = np.nan_to_num(gt_ratio, nan=0.0)
@@ -108,6 +123,7 @@ def _rank_rows(gt_ratio: np.ndarray,
 
 
 def _candidate_row_counts(min_spots: int, max_spots: int) -> List[int]:
+    """Standard ladder of trial spot counts within ``[min_spots, max_spots]`` (descending)."""
     base = [1024, 768, 512, 384, 256, 192, 160, 128, 96, 80, 64, 48, 32, 24, 16, 12, 10, 8]
     kept = [n for n in base if min_spots <= n <= max_spots]
     if min_spots not in kept and min_spots <= max_spots:
@@ -122,6 +138,15 @@ def select_block(gt_ratio: np.ndarray,
                  max_spots: int,
                  mode: str,
                  high_signal_threshold: float = 0.05) -> Dict[str, np.ndarray]:
+    """Pick a fully-observed sub-block of ``gt_ratio`` for visualisation.
+
+    Tries the candidate spot counts in :func:`_candidate_row_counts` until
+    one yields enough fully-observed columns; ranks rows via
+    :func:`_rank_rows` and columns via :func:`_score_sites`, then orders both
+    axes by hierarchical clustering on the GT sub-block. Returns a dict with
+    ``rows``, ``cols``, ``fully_observed_cols``, and ``selected_n_spots``.
+    Raises ``RuntimeError`` if no candidate row count works.
+    """
     observed_mask = ~np.isnan(gt_ratio)
     row_order = _rank_rows(gt_ratio, mode=mode, high_signal_threshold=high_signal_threshold)
 
@@ -173,6 +198,11 @@ def render_block(name: str,
                  val_mask: np.ndarray,
                  rows: np.ndarray,
                  cols: np.ndarray) -> Dict[str, object]:
+    """Save the 1x3 full-block and 1x2 holdout-only heatmaps for one model.
+
+    Returns metadata ``{rows, cols, column_order, full_heatmap, holdout_heatmap}``
+    so the caller can record what was rendered.
+    """
     os.makedirs(out_dir, exist_ok=True)
 
     gt_sub = gt_ratio[np.ix_(rows, cols)]
@@ -219,6 +249,12 @@ def render_block(name: str,
 
 
 def main() -> None:
+    """CLI entry point: produce all three observed-only block figures for one model directory.
+
+    Loads ``gt_ratio.npy`` / ``train_ratio.npy`` / ``pred_ratio.npy`` /
+    ``val_mask.npy`` from ``--model_dir`` and writes a ``dual_block_summary.json``
+    summarising the rendered blocks under ``--out_dir``.
+    """
     ap = argparse.ArgumentParser(description="Render dense, rare-peak, and high-signal observed-only heatmaps.")
     ap.add_argument("--model_dir", default=os.path.join("results", "phase1_harder_benchmark", "AIRGate-ST", "seed42"))
     ap.add_argument("--out_dir", default=os.path.join("results", "visualization", "airgate_dual_block"))

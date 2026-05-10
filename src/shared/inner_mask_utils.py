@@ -1,3 +1,11 @@
+"""Inner-validation split utilities used by the neural training scripts.
+
+Provides a per-site stratified split of the outer training mask into a
+``fit`` mask (visible to the model during a training epoch) and an
+``inner_val`` mask (used for unbiased epoch selection / early stopping).
+The final external holdout (``val_mask``) is never touched here.
+"""
+
 import numpy as np
 import torch
 

@@ -17,6 +17,12 @@ DEFAULT_SOURCE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".
 
 
 def add_source_paths(source_root: str) -> None:
+    """Add the project's helper directories to ``sys.path``.
+
+    Required so the deferred imports of ``shared.data_utils`` and
+    ``baseline_utils`` inside :func:`main` resolve regardless of the directory
+    the script is invoked from.
+    """
     sys.path.insert(0, os.path.join(source_root, "src", "models", "AIRGate-ST"))
     sys.path.insert(0, os.path.join(source_root, "src", "shared"))
 
@@ -111,6 +117,13 @@ def multiple_imputation_ratio(gt_ratio: np.ndarray, train_mask: np.ndarray,
 
 
 def mean_baseline(gt_ratio: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
+    """Per-site mean imputation.
+
+    For each site (column) the prediction is the mean of all training-visible
+    ratios at that site. Sites with no training observations fall back to the
+    global training mean. Training-visible cells are written through with
+    their exact ground-truth ratio.
+    """
     train_values = np.where(train_mask, gt_ratio, np.nan)
     col_mean = np.nanmean(train_values, axis=0)
     global_mean = float(np.nanmean(train_values))
@@ -122,6 +135,13 @@ def mean_baseline(gt_ratio: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
 
 def validate_prediction_output(name: str, pred: np.ndarray, gt_ratio: np.ndarray,
                                train_mask: np.ndarray, val_mask: np.ndarray) -> np.ndarray:
+    """Verify a baseline prediction matrix before it is written to disk.
+
+    Checks: shape match with ``gt_ratio``; finiteness on observed (train +
+    val) entries; finite values constrained to ``[0, 1]``; ``val_mask``
+    entries finite (so metric scoring can proceed); training-visible entries
+    exactly equal to ``gt_ratio``. Raises ``ValueError`` on any violation.
+    """
     pred = pred.astype(np.float32, copy=False)
     if pred.shape != gt_ratio.shape:
         raise ValueError(f"{name}: shape mismatch pred={pred.shape}, gt={gt_ratio.shape}")
@@ -140,6 +160,26 @@ def validate_prediction_output(name: str, pred: np.ndarray, gt_ratio: np.ndarray
 
 
 def main() -> None:
+    """CLI entry point: load the h5ad, apply the external masks, and write the
+    five baseline prediction files plus the matching ground-truth and mask
+    arrays into ``--out_dir``.
+
+    Steps:
+
+      1. Load the AnnData h5ad and apply the same site-frequency and
+         min-depth filters used by the neural training scripts.
+      2. Load the external ``train_mask.npy`` / ``val_mask.npy`` from
+         ``--mask_dir`` and validate that ``train_mask | val_mask`` exactly
+         equals the resulting ``observed_mask``.
+      3. Compute predictions for the five baselines (Mean, SoftImpute,
+         Multiple Imputation, Spatial KNN, Spatial IDW). Each is validated
+         and written as ``<method>_ratio.npy``. Spatial KNN/IDW operate on
+         log-transformed A/G counts and reconstruct the ratio from the
+         predicted log-counts.
+      4. Copy mask and ground-truth arrays into ``--out_dir`` so downstream
+         visualization scripts can read them from a single directory.
+      5. Write a small JSON summary with applied thresholds and depth stats.
+    """
     ap = argparse.ArgumentParser(
         description="Run baseline models: Mean, SoftImpute, Multiple Imputation, Spatial KNN, and Spatial IDW."
     )
