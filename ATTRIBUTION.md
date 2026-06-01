@@ -22,6 +22,12 @@ This artifact builds on established open-source libraries:
 - AnnData and h5py for `.h5ad` data loading.
 - Matplotlib for visualization.
 
+## License Scope
+
+The original steSI source code, documentation, configuration files, notebooks, visualization scripts, and small committed demonstration outputs are released under the MIT License in `LICENSE`.
+
+External datasets, third-party libraries, and dependency packages retain their original licenses and are not relicensed by this project.
+
 ## Naming Notes
 
 The formal model names used in the final artifact are:

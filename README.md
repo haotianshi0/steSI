@@ -54,9 +54,10 @@ Evaluation and visualization
 - `visualization/plot_method_comparison_boxplots.py` - script behind the boxplot in notebook Section 6.
 - `visualization/plot_selected_models_mask_ratio.py` - script behind the line plot in notebook Section 5.
 
-Attribution and AI use
+Attribution, license, and AI use
 
 - `ATTRIBUTION.md` - original components and open-source dependencies.
+- `LICENSE` - MIT license for the original project code, documentation, notebooks, scripts, configuration files, and small committed demonstration outputs.
 - `AI_USE_DECLARATION.md` - AI assistance declaration.
 
 Recommended sanity command (no GPU, no training):
@@ -350,7 +351,8 @@ The spatial component uses neighboring spots as local support. AIRGate-ST aggreg
 
 This mechanism-level interpretation is reported together with layered metrics: `all_holdout` evaluates all held-out observed entries, while `gt_positive` focuses on held-out entries with positive editing signal.
 
-## Attribution and AI Use
+## Attribution, License, and AI Use
 
 - Dependency and originality notes: `ATTRIBUTION.md`
+- Project license: `LICENSE`
 - AI use declaration: `AI_USE_DECLARATION.md`
